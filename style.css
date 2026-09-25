@@ -488,6 +488,14 @@ body {
   transform: scale(0.95);
 }
 
+.healthcare-shortcut {
+  color: var(--sos);
+}
+
+.healthcare-shortcut i {
+  color: var(--sos);
+}
+
 .home-quick-btn i {
   font-size: 1.2rem;
   color: var(--primary);
@@ -498,6 +506,194 @@ body {
   font-weight: 600;
   text-align: center;
   line-height: 1.1;
+}
+
+/* ===== HEALTHCARE HUB ===== */
+.healthcare-intro {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+  border-radius: var(--radius-md);
+  background: rgba(212, 114, 106, 0.1);
+  border: 1px solid rgba(212, 114, 106, 0.14);
+}
+
+.healthcare-intro-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--sos);
+  color: white;
+  font-size: 1.25rem;
+}
+
+.healthcare-intro-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.healthcare-intro-sub {
+  margin-top: 2px;
+  font-size: 0.72rem;
+  color: var(--text-soft);
+}
+
+.healthcare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.healthcare-card {
+  min-height: 116px;
+  padding: 12px 10px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  color: var(--text-main);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 5px;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: var(--shadow-card);
+  transition: var(--transition);
+}
+
+.healthcare-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary-soft);
+}
+
+.healthcare-card:active {
+  transform: scale(0.97);
+}
+
+.healthcare-card-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+}
+
+.healthcare-card.doctor .healthcare-card-icon { background: rgba(111, 168, 214, 0.18); color: var(--accent-blue); }
+.healthcare-card.appointment .healthcare-card-icon { background: rgba(123, 196, 164, 0.18); color: var(--accent-green); }
+.healthcare-card.contact .healthcare-card-icon { background: rgba(74, 144, 164, 0.16); color: var(--primary); }
+.healthcare-card.medicine .healthcare-card-icon { background: rgba(232, 184, 143, 0.22); color: #bd8858; }
+
+.healthcare-card-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.healthcare-card-sub {
+  font-size: 0.68rem;
+  line-height: 1.2;
+  color: var(--text-soft);
+}
+
+.healthcare-detail-card {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--shadow-card);
+  animation: screenFadeIn 0.25s ease;
+}
+
+.healthcare-detail-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--primary-deep);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.healthcare-doctor-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.healthcare-doctor-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.healthcare-doctor-row strong,
+.healthcare-doctor-row span {
+  display: block;
+}
+
+.healthcare-doctor-row strong { font-size: 0.85rem; }
+.healthcare-doctor-row span { margin-top: 2px; color: var(--text-soft); font-size: 0.7rem; }
+
+.healthcare-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--accent-green);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.healthcare-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-green);
+}
+
+.healthcare-appointment-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--accent-green);
+  font-size: 0.8rem;
+}
+
+.healthcare-appointment-date {
+  margin-top: 8px;
+  color: var(--text-main);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.healthcare-appointment-type,
+.healthcare-detail-note {
+  margin-top: 3px;
+  color: var(--text-soft);
+  font-size: 0.7rem;
+}
+
+.healthcare-detail-note {
+  margin-top: 9px;
+  color: var(--primary);
 }
 
 /* ===== SCREEN HEADER ===== */
@@ -2170,12 +2366,99 @@ body {
   border-bottom-right-radius: 4px;
 }
 
+.voice-bubble {
+  cursor: pointer;
+}
+
+.voice-bubble:focus-visible {
+  outline: 3px solid var(--accent-warm);
+  outline-offset: 2px;
+}
+
+.voice-bubble-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 .message-reply-bar {
   display: flex;
+  align-items: center;
   gap: 8px;
   padding: 8px 0 4px;
   flex-shrink: 0;
   border-top: 1px solid var(--card-border);
+}
+
+.reply-record-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--primary);
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: var(--transition);
+}
+
+.reply-record-btn.recording {
+  background: var(--sos);
+  border-color: var(--sos);
+  color: white;
+  animation: voiceRecordingPulse 1s ease-in-out infinite;
+}
+
+.reply-record-btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+@keyframes voiceRecordingPulse {
+  50% { transform: scale(0.9); }
+}
+
+.recording-timer {
+  color: var(--sos);
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.voice-preview {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.voice-preview audio,
+.message-audio {
+  width: 100%;
+  max-width: 190px;
+  height: 34px;
+}
+
+.voice-clear-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+}
+
+.voice-clear-btn:hover {
+  color: var(--sos);
 }
 
 .reply-input {

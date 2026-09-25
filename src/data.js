@@ -40,6 +40,11 @@ const dashboardMembersFallback = [
   { name: 'Anita', initials: 'AS', color: '#e8b88f', detail: 'Last check-in: 1 day ago', status: 'warn' },
 ]
 
+const mapMessage = m => ({
+  id: m.id, sender: m.sender, initials: m.initials, color: m.color,
+  text: m.text, time: m.time, unread: m.unread,
+})
+
 export async function loadData() {
   const [
     { data: familyContacts, error: e1 },
@@ -60,10 +65,7 @@ export async function loadData() {
       id: c.id, name: c.name, relationKey: c.relation_key, initials: c.initials,
       color: c.color, online: c.online, phone: c.phone,
     })) : familyContactsFallback,
-    initialMessages: (!e2 && messages?.length) ? messages.map(m => ({
-      id: m.id, sender: m.sender, initials: m.initials, color: m.color,
-      text: m.text, time: m.time, unread: m.unread,
-    })) : initialMessagesFallback,
+    initialMessages: (!e2 && messages?.length) ? messages.map(mapMessage) : initialMessagesFallback,
     initialMedicines: (!e3 && medicines?.length) ? medicines.map(m => ({
       id: m.id, name: m.name, dose: m.dose, time: m.time, period: m.period, taken: m.taken,
     })) : initialMedicinesFallback,
@@ -73,6 +75,19 @@ export async function loadData() {
     dashboardMembers: (!e5 && dashboardMembers?.length) ? dashboardMembers.map(m => ({
       name: m.name, initials: m.initials, color: m.color, detail: m.detail, status: m.status,
     })) : dashboardMembersFallback,
+  }
+}
+
+export function subscribeToMessages(onMessage) {
+  const channel = supabase
+    .channel('withyou-messages')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
+      onMessage(mapMessage({ ...payload.new, time: 'just now', unread: true }))
+    })
+    .subscribe()
+
+  return () => {
+    supabase.removeChannel(channel)
   }
 }
 
@@ -91,7 +106,12 @@ export async function loadReplies(messageId) {
     .eq('message_id', messageId)
     .order('id', { ascending: true })
   if (error || !data) return []
-  return data.map(r => ({ id: r.id, sender: r.sender, text: r.text }))
+  return data.map(r => ({
+    id: r.id,
+    sender: r.sender,
+    text: r.text?.startsWith('data:audio/') ? 'Voice message' : r.text,
+    audioUrl: r.audio_url || (r.text?.startsWith('data:audio/') ? r.text : null),
+  }))
 }
 
 export async function sendReply(messageId, text) {
@@ -102,4 +122,45 @@ export async function sendReply(messageId, text) {
     .single()
   if (error || !data) return null
   return { id: data.id, sender: data.sender, text: data.text }
+}
+
+export async function sendVoiceReply(messageId, audioBlob) {
+  const dataUrl = await new Promise(resolve => {
+    const reader = new FileReader()
+    reader.onloadend = () => resolve(reader.result)
+    reader.readAsDataURL(audioBlob)
+  })
+  const filePath = `${messageId}/${Date.now()}.webm`
+  const upload = await supabase.storage
+    .from('voice-messages')
+    .upload(filePath, audioBlob, { contentType: audioBlob.type || 'audio/webm', upsert: false })
+
+  let audioUrl = dataUrl
+  if (!upload.error) {
+    const { data: publicFile } = supabase.storage.from('voice-messages').getPublicUrl(filePath)
+    audioUrl = publicFile.publicUrl
+  }
+
+  let { data, error } = await supabase
+    .from('message_replies')
+    .insert({ message_id: messageId, sender: 'Arjun', text: 'Voice message', audio_url: audioUrl })
+    .select('*')
+    .single()
+
+  // Keep voice messages working even before the optional audio_url migration is applied.
+  if (error) {
+    ({ data, error } = await supabase
+      .from('message_replies')
+      .insert({ message_id: messageId, sender: 'Arjun', text: dataUrl })
+      .select('*')
+      .single())
+  }
+
+  if (error || !data) return null
+  return {
+    id: data.id,
+    sender: data.sender,
+    text: data.text?.startsWith('data:audio/') ? 'Voice message' : data.text,
+    audioUrl: data.audio_url || (data.text?.startsWith('data:audio/') ? data.text : audioUrl),
+  }
 }

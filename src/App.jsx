@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { languages } from './i18n.js'
 import { useVoiceAssistant } from './useVoiceAssistant.js'
-import { loadData, updateMedicineTaken, markMessageRead, loadReplies, sendReply, relationMap } from './data.js'
+import { loadData, subscribeToMessages, updateMedicineTaken, markMessageRead, loadReplies, sendReply, sendVoiceReply, relationMap } from './data.js'
 
 function pad(n) { return n < 10 ? '0' + n : '' + n }
 
@@ -34,6 +34,37 @@ function getDateString(lang) {
   return `${dl[d.getDay()]}, ${d.getDate()} ${ml[d.getMonth()]}`
 }
 
+function getScheduledTime(time) {
+  const match = time?.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)
+  if (!match) return null
+  let hour = Number(match[1])
+  const minute = Number(match[2])
+  const period = match[3].toUpperCase()
+  if (period === 'AM' && hour === 12) hour = 0
+  if (period === 'PM' && hour !== 12) hour += 12
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+}
+
+const healthcareCopy = {
+  title: 'Healthcare',
+  doctor: 'Doctor Assigned',
+  doctorSub: 'View doctor details',
+  appointment: 'Appointment Status',
+  appointmentSub: 'Track your booking',
+  contact: 'Contact Doctor',
+  contactSub: 'Call your doctor',
+  medicine: 'Medicine Reminder',
+  medicineSub: 'View scheduled medicines',
+  doctorName: 'Dr. Mehra',
+  specialty: 'Family Physician',
+  clinic: 'WithYou Care Clinic',
+  doctorAvailable: 'Available today',
+  appointmentConfirmed: 'Confirmed',
+  appointmentDate: 'Tomorrow, 10:30 AM',
+  appointmentType: 'Routine check-up',
+  appointmentUpdated: 'Last updated today',
+}
+
 export default function App() {
   const [lang, setLang] = useState('en')
   const t = languages[lang]
@@ -62,10 +93,15 @@ export default function App() {
   const [showVoice, setShowVoice] = useState(false)
   const [cameraOn, setCameraOn] = useState(false)
   const [cameraError, setCameraError] = useState(false)
+  const [healthcareDetail, setHealthcareDetail] = useState(null)
   const [openMessage, setOpenMessage] = useState(null)
   const [messageReplies, setMessageReplies] = useState([])
   const [replyInput, setReplyInput] = useState('')
   const [sendingReply, setSendingReply] = useState(false)
+  const [recordingReply, setRecordingReply] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
+  const [recordedVoice, setRecordedVoice] = useState(null)
+  const [playingVoiceId, setPlayingVoiceId] = useState(null)
   const [toggles, setToggles] = useState({ sound: true, vibration: true, largetext: true, location: true, sos: true })
 
   const callTimerRef = useRef(null)
@@ -75,6 +111,13 @@ export default function App() {
   const videoRef = useRef(null)
   const pipRef = useRef(null)
   const cameraStreamRef = useRef(null)
+  const spokenMessageIdsRef = useRef(new Set())
+  const recorderRef = useRef(null)
+  const recorderStreamRef = useRef(null)
+  const recorderChunksRef = useRef([])
+  const recordingTimerRef = useRef(null)
+  const voiceAudioRefs = useRef(new Map())
+  const medicineReminderKeysRef = useRef(new Set())
 
   // Clock
   const [now, setNow] = useState(new Date())
@@ -134,7 +177,30 @@ export default function App() {
     showToast(t.voice.title + ': ' + text, 'bi-mic')
   }, [t])
 
-  const { listening, supported: voiceSupported, start: startVoice, stop: stopVoice } = useVoiceAssistant(t.voice, handleVoiceCommand)
+  const { listening, supported: voiceSupported, start: startVoice, stop: stopVoice, speak } = useVoiceAssistant(t.voice, handleVoiceCommand)
+
+  useEffect(() => {
+    if (!toggles.sound) return
+
+    messages.forEach(message => {
+      if (!message.unread || spokenMessageIdsRef.current.has(message.id)) return
+      spokenMessageIdsRef.current.add(message.id)
+      speak(t.messages.newFrom.replace('{sender}', message.sender), t.voice)
+      speak(message.text, t.voice)
+    })
+  }, [messages, speak, t.messages.newFrom, t.voice, toggles.sound])
+
+  useEffect(() => subscribeToMessages((message) => {
+    setMessages(previous => previous.some(item => item.id === message.id) ? previous : [...previous, message])
+    setNotifications(previous => [{
+      id: `message-${message.id}`,
+      icon: 'bi-chat-heart',
+      color: message.color,
+      title: t.messages.title,
+      text: `${message.sender}: ${message.text}`,
+      time: message.time,
+    }, ...previous])
+  }), [t.messages.title])
 
   // Call timer
   useEffect(() => {
@@ -165,30 +231,49 @@ export default function App() {
     }
   }, [sosActive])
 
-  // Medicine reminder after 4s
+  // Check scheduled medicine reminders while the watch is open.
   useEffect(() => {
-    if (splashGone) {
-      const t = setTimeout(() => {
+    if (!splashGone || !medicines.length) return undefined
+
+    const checkMedicineReminders = () => {
+      const current = new Date()
+      const currentTime = `${String(current.getHours()).padStart(2, '0')}:${String(current.getMinutes()).padStart(2, '0')}`
+      const today = `${current.getFullYear()}-${current.getMonth() + 1}-${current.getDate()}`
+
+      medicines.forEach(medicine => {
+        if (medicine.taken || getScheduledTime(medicine.time) !== currentTime) return
+        const reminderKey = `${today}-${medicine.id}-${currentTime}`
+        if (medicineReminderKeysRef.current.has(reminderKey)) return
+        medicineReminderKeysRef.current.add(reminderKey)
+
+        const reminderText = `${medicine.name}, ${medicine.dose}. ${t.medicine.reminder}`
         setModal({
           iconClass: 'medicine',
           icon: 'bi-capsule',
           title: t.medicine.reminder,
-          text: t.medicine.reminderText,
+          text: reminderText,
+          medicineId: medicine.id,
           actions: [
             { label: t.medicine.taken, class: 'success', action: 'taken' },
             { label: t.medicine.snooze, class: 'secondary', action: 'snooze' },
           ],
         })
-      }, 4000)
-      return () => clearTimeout(t)
+        showToast(`${medicine.name} ${t.medicine.reminder}`, 'bi-capsule')
+        if (toggles.sound) speak(reminderText, t.voice)
+      })
     }
-  }, [splashGone, t])
+
+    checkMedicineReminders()
+    const reminderTimer = setInterval(checkMedicineReminders, 30000)
+    return () => clearInterval(reminderTimer)
+  }, [medicines, showToast, splashGone, speak, t, toggles.sound])
 
   const handleModalAction = (action) => {
+    const medicineId = modal?.medicineId
     setModal(null)
-    if (action === 'taken') {
-      setMedicines(prev => prev.map(m => m.id === 2 ? { ...m, taken: true } : m))
-      updateMedicineTaken(2, true)
+    if (action === 'taken' && medicineId) {
+      setMedicines(prev => prev.map(m => m.id === medicineId ? { ...m, taken: true } : m))
+      updateMedicineTaken(medicineId, true)
       showToast(t.medicine.marked, 'bi-check-circle')
     }
   }
@@ -203,19 +288,113 @@ export default function App() {
   }
 
   const closeMessageThread = () => {
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
+    recorderStreamRef.current?.getTracks().forEach(track => track.stop())
+    if (recordedVoice?.url) URL.revokeObjectURL(recordedVoice.url)
     setOpenMessage(null)
     setMessageReplies([])
     setReplyInput('')
+    setRecordedVoice(null)
+    setRecordingReply(false)
+    setRecordingSeconds(0)
+  }
+
+  const playVoiceOutLoud = (url) => {
+    const audio = new Audio(url)
+    audio.volume = 1
+    audio.play().catch(() => {
+      showToast(t.messages.voicePlaybackBlocked || 'Tap the audio player to hear your voice message', 'bi-volume-mute-fill')
+    })
+  }
+
+  const toggleVoiceReply = (reply) => {
+    const audio = voiceAudioRefs.current.get(reply.id)
+    if (!audio) return
+
+    voiceAudioRefs.current.forEach(player => {
+      if (player !== audio) player.pause()
+    })
+
+    if (audio.paused) {
+      audio.volume = 1
+      audio.play().then(() => setPlayingVoiceId(reply.id)).catch(() => {
+        showToast(t.messages.voicePlaybackBlocked || 'Tap the audio controls to hear this voice message', 'bi-volume-mute-fill')
+      })
+    } else {
+      audio.pause()
+      setPlayingVoiceId(null)
+    }
   }
 
   const handleSendReply = async () => {
-    if (!replyInput.trim() || !openMessage || sendingReply) return
+    if ((!replyInput.trim() && !recordedVoice) || !openMessage || sendingReply) return
     const text = replyInput.trim()
+    const voice = recordedVoice
     setSendingReply(true)
     setReplyInput('')
-    const saved = await sendReply(openMessage.id, text)
+    if (voice?.url) {
+      playVoiceOutLoud(voice.url)
+      showToast(t.messages.voiceSent || 'Voice message sent and playing', 'bi-volume-up-fill')
+    }
+    const saved = voice
+      ? await sendVoiceReply(openMessage.id, voice.blob)
+      : await sendReply(openMessage.id, text)
+    if (!saved && voice) {
+      showToast(t.messages.voiceSendFailed || 'Voice message could not be sent', 'bi-exclamation-circle')
+      setSendingReply(false)
+      return
+    }
     setMessageReplies(prev => [...prev, saved || { id: Date.now(), sender: 'Arjun', text }])
+    if (voice?.url && saved?.audioUrl) URL.revokeObjectURL(voice.url)
+    setRecordedVoice(null)
     setSendingReply(false)
+  }
+
+  const startReplyRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      showToast(t.messages.voiceNotSupported || 'Voice recording is not supported', 'bi-mic-mute')
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm'
+      const recorder = new MediaRecorder(stream, { mimeType })
+      recorderRef.current = recorder
+      recorderStreamRef.current = stream
+      recorderChunksRef.current = []
+      recorder.ondataavailable = event => {
+        if (event.data.size > 0) recorderChunksRef.current.push(event.data)
+      }
+      recorder.onstop = () => {
+        const blob = new Blob(recorderChunksRef.current, { type: recorder.mimeType })
+        const url = URL.createObjectURL(blob)
+        setRecordedVoice(previous => {
+          if (previous?.url) URL.revokeObjectURL(previous.url)
+          return { blob, url }
+        })
+        stream.getTracks().forEach(track => track.stop())
+        recorderStreamRef.current = null
+        recorderRef.current = null
+        clearInterval(recordingTimerRef.current)
+        setRecordingReply(false)
+      }
+      recorder.start()
+      setRecordingReply(true)
+      setRecordingSeconds(0)
+      recordingTimerRef.current = setInterval(() => setRecordingSeconds(seconds => seconds + 1), 1000)
+    } catch {
+      showToast(t.messages.voicePermission || 'Microphone permission is needed', 'bi-mic-mute')
+    }
+  }
+
+  const stopReplyRecording = () => {
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
+  }
+
+  const clearRecordedVoice = () => {
+    if (recordedVoice?.url) URL.revokeObjectURL(recordedVoice.url)
+    setRecordedVoice(null)
   }
 
   const requestVideoCall = (contact) => {
@@ -326,6 +505,9 @@ export default function App() {
   const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`
   const dateStr = getDateString(lang)
   const greeting = t.greeting[getGreetingKey()]
+  const assignedDoctor = familyContacts.find(contact => contact.relationKey === 'Doctor') || {
+    id: 'doctor', name: healthcareCopy.doctorName, initials: 'DM', color: '#4a90a4', online: true,
+  }
 
   return (
     <>
@@ -400,7 +582,66 @@ export default function App() {
                 <button className="home-quick-btn" onClick={() => setScreen('notifications')}><i className="bi bi-bell"></i><span>{t.nav.notifications}</span></button>
                 <button className="home-quick-btn" onClick={() => setScreen('settings')}><i className="bi bi-gear"></i><span>{t.nav.settings}</span></button>
                 <button className="home-quick-btn" onClick={() => setScreen('dashboard')}><i className="bi bi-house-heart"></i><span>{t.nav.dashboard}</span></button>
+                <button className="home-quick-btn healthcare-shortcut" onClick={() => { setHealthcareDetail(null); setScreen('healthcare') }}><i className="bi bi-heart-pulse-fill"></i><span>{healthcareCopy.title}</span></button>
               </div>
+            </div>
+          )}
+
+          {/* HEALTHCARE */}
+          {screen === 'healthcare' && (
+            <div className="screen active" id="screen-healthcare">
+              <div className="screen-header">
+                <button className="back-btn" onClick={() => setScreen('home')}><i className="bi bi-chevron-left"></i></button>
+                <h2 className="screen-title">{healthcareCopy.title}</h2>
+              </div>
+              <div className="healthcare-intro">
+                <div className="healthcare-intro-icon"><i className="bi bi-heart-pulse-fill"></i></div>
+                <div>
+                  <div className="healthcare-intro-title">Your care at a glance</div>
+                  <div className="healthcare-intro-sub">Choose an option below</div>
+                </div>
+              </div>
+              <div className="healthcare-grid">
+                <button className="healthcare-card doctor" onClick={() => setHealthcareDetail('doctor')}>
+                  <span className="healthcare-card-icon"><i className="bi bi-person-badge-fill"></i></span>
+                  <span className="healthcare-card-title">{healthcareCopy.doctor}</span>
+                  <span className="healthcare-card-sub">{healthcareCopy.doctorSub}</span>
+                </button>
+                <button className="healthcare-card appointment" onClick={() => setHealthcareDetail('appointment')}>
+                  <span className="healthcare-card-icon"><i className="bi bi-calendar2-check-fill"></i></span>
+                  <span className="healthcare-card-title">{healthcareCopy.appointment}</span>
+                  <span className="healthcare-card-sub">{healthcareCopy.appointmentSub}</span>
+                </button>
+                <button className="healthcare-card contact" onClick={() => startCall(assignedDoctor, 'voice')}>
+                  <span className="healthcare-card-icon"><i className="bi bi-telephone-fill"></i></span>
+                  <span className="healthcare-card-title">{healthcareCopy.contact}</span>
+                  <span className="healthcare-card-sub">{healthcareCopy.contactSub}</span>
+                </button>
+                <button className="healthcare-card medicine" onClick={() => setScreen('medicine')}>
+                  <span className="healthcare-card-icon"><i className="bi bi-capsule-fill"></i></span>
+                  <span className="healthcare-card-title">{healthcareCopy.medicine}</span>
+                  <span className="healthcare-card-sub">{healthcareCopy.medicineSub}</span>
+                </button>
+              </div>
+              {healthcareDetail === 'doctor' && (
+                <div className="healthcare-detail-card">
+                  <div className="healthcare-detail-heading"><i className="bi bi-person-badge-fill"></i> {healthcareCopy.doctor}</div>
+                  <div className="healthcare-doctor-row">
+                    <div className="healthcare-doctor-avatar" style={{ background: assignedDoctor.color }}>{assignedDoctor.initials}</div>
+                    <div><strong>{assignedDoctor.name}</strong><span>{healthcareCopy.specialty}</span><span>{healthcareCopy.clinic}</span></div>
+                  </div>
+                  <div className="healthcare-status"><span className="healthcare-status-dot"></span>{healthcareCopy.doctorAvailable}</div>
+                </div>
+              )}
+              {healthcareDetail === 'appointment' && (
+                <div className="healthcare-detail-card">
+                  <div className="healthcare-detail-heading"><i className="bi bi-calendar2-check-fill"></i> {healthcareCopy.appointment}</div>
+                  <div className="healthcare-appointment-status"><i className="bi bi-check-circle-fill"></i><strong>{healthcareCopy.appointmentConfirmed}</strong></div>
+                  <div className="healthcare-appointment-date">{healthcareCopy.appointmentDate}</div>
+                  <div className="healthcare-appointment-type">{healthcareCopy.appointmentType} · {assignedDoctor.name}</div>
+                  <div className="healthcare-detail-note">{healthcareCopy.appointmentUpdated}</div>
+                </div>
+              )}
             </div>
           )}
 
@@ -543,12 +784,49 @@ export default function App() {
                   <div className="bubble-text">{openMessage.text}</div>
                 </div>
                 {messageReplies.map(r => (
-                  <div key={r.id} className={`message-thread-bubble ${r.sender === 'Arjun' ? 'sent' : 'received'}`}>
-                    <div className="bubble-text">{r.text}</div>
+                  <div
+                    key={r.id}
+                    className={`message-thread-bubble ${r.sender === 'Arjun' ? 'sent' : 'received'} ${r.audioUrl ? 'voice-bubble' : ''}`}
+                    onClick={event => {
+                      if (r.audioUrl && !event.target.closest('audio')) toggleVoiceReply(r)
+                    }}
+                    role={r.audioUrl ? 'button' : undefined}
+                    tabIndex={r.audioUrl ? 0 : undefined}
+                    onKeyDown={event => {
+                      if (r.audioUrl && (event.key === 'Enter' || event.key === ' ')) toggleVoiceReply(r)
+                    }}
+                  >
+                    <div className="bubble-text">
+                      {r.audioUrl ? (
+                        <>
+                          <span className="voice-bubble-label"><i className={`bi ${playingVoiceId === r.id ? 'bi-pause-fill' : 'bi-play-fill'}`}></i> Voice message</span>
+                          <audio
+                            className="message-audio"
+                            ref={audio => {
+                              if (audio) voiceAudioRefs.current.set(r.id, audio)
+                              else voiceAudioRefs.current.delete(r.id)
+                            }}
+                            src={r.audioUrl}
+                            controls
+                            preload="metadata"
+                            onPlay={() => setPlayingVoiceId(r.id)}
+                            onPause={() => setPlayingVoiceId(current => current === r.id ? null : current)}
+                            onEnded={() => setPlayingVoiceId(null)}
+                          />
+                        </>
+                      ) : r.text}
+                    </div>
                   </div>
                 ))}
               </div>
               <div className="message-reply-bar">
+                {recordingReply && <span className="recording-timer"><i className="bi bi-record-fill"></i> {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:{String(recordingSeconds % 60).padStart(2, '0')}</span>}
+                {recordedVoice && !recordingReply && (
+                  <div className="voice-preview">
+                    <audio src={recordedVoice.url} controls preload="metadata" />
+                    <button className="voice-clear-btn" onClick={clearRecordedVoice} title="Remove voice message"><i className="bi bi-x-lg"></i></button>
+                  </div>
+                )}
                 <input
                   type="text"
                   className="reply-input"
@@ -556,9 +834,17 @@ export default function App() {
                   value={replyInput}
                   onChange={(e) => setReplyInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSendReply() }}
-                  disabled={sendingReply}
+                  disabled={sendingReply || recordingReply || Boolean(recordedVoice)}
                 />
-                <button className="reply-send-btn" onClick={handleSendReply} disabled={sendingReply || !replyInput.trim()}>
+                <button
+                  className={`reply-record-btn ${recordingReply ? 'recording' : ''}`}
+                  onClick={recordingReply ? stopReplyRecording : startReplyRecording}
+                  title={recordingReply ? (t.messages.stopRecording || 'Stop recording') : (t.messages.recordVoice || 'Record voice message')}
+                  disabled={sendingReply || Boolean(recordedVoice)}
+                >
+                  <i className={`bi ${recordingReply ? 'bi-stop-fill' : 'bi-mic-fill'}`}></i>
+                </button>
+                <button className="reply-send-btn" onClick={handleSendReply} disabled={sendingReply || (!replyInput.trim() && !recordedVoice)}>
                   <i className="bi bi-send-fill"></i>
                 </button>
               </div>
